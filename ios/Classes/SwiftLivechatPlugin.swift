@@ -2,13 +2,22 @@ import Flutter
 import UIKit
 import LiveChat
 
-public class SwiftLivechatPlugin: NSObject, FlutterPlugin {
+public class SwiftLivechatPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, LiveChatDelegate {
   private var isInitialized = false
+  private var eventSink: FlutterEventSink?
 
   public static func register(with registrar: FlutterPluginRegistrar) {
-    let channel = FlutterMethodChannel(name: "livechatt", binaryMessenger: registrar.messenger())
+    let methodChannel = FlutterMethodChannel(name: "livechatt", binaryMessenger: registrar.messenger())
+    let eventChannel = FlutterEventChannel(name: "livechatt/events", binaryMessenger: registrar.messenger())
+
     let instance = SwiftLivechatPlugin()
-    registrar.addMethodCallDelegate(instance, channel: channel)
+    registrar.addMethodCallDelegate(instance, channel: methodChannel)
+    eventChannel.setStreamHandler(instance)
+
+    // `LiveChat.delegate` is weak — `instance` is kept alive by Flutter's
+    // method-call delegate registration, so the weak reference stays valid
+    // for the lifetime of the Flutter engine.
+    LiveChat.delegate = instance
 
     let factory = EmbeddedChatViewFactory(messenger: registrar.messenger())
     registrar.register(factory, withId: "embedded_chat_view")
@@ -42,6 +51,48 @@ public class SwiftLivechatPlugin: NSObject, FlutterPlugin {
             result(FlutterMethodNotImplemented)
     }
   }
+
+  // MARK: - FlutterStreamHandler (livechatt/events)
+
+  public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+    self.eventSink = events
+    return nil
+  }
+
+  public func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    self.eventSink = nil
+    return nil
+  }
+
+  // MARK: - LiveChatDelegate
+  // Event payloads mirror the Android plugin's EventType taxonomy so Dart-side
+  // listeners read the same shape regardless of platform. The Android plugin
+  // emits a third event (`WindowInitialized`) that doesn't have an iOS
+  // equivalent in LiveChat 2.x — Dart callers should not rely on it.
+
+  public func chatPresented() {
+    eventSink?([
+      "EventType": "ChatWindowVisibilityChanged",
+      "visibility": true,
+    ])
+  }
+
+  public func chatDismissed() {
+    eventSink?([
+      "EventType": "ChatWindowVisibilityChanged",
+      "visibility": false,
+    ])
+  }
+
+  public func received(message: LiveChatMessage) {
+    eventSink?([
+      "EventType": "NewMessage",
+      "text": message.text,
+      "windowVisible": LiveChat.isChatPresented,
+    ])
+  }
+
+  // MARK: - Method handlers
 
   private func handleBeginChat(call: FlutterMethodCall, result: @escaping FlutterResult) {
     let arguments = call.arguments as! [String:Any]
