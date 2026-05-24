@@ -109,6 +109,7 @@ public class SwiftLivechatPlugin: NSObject, FlutterPlugin, FlutterStreamHandler,
     }
 
     configureLiveChat(licenseNo: licenseNo, groupId: groupId, visitorName: visitorName, visitorEmail: visitorEmail, customParams: customParams)
+    ensureActiveWindowScene()
     LiveChat.presentChat()
     result(nil)
   }
@@ -134,10 +135,26 @@ public class SwiftLivechatPlugin: NSObject, FlutterPlugin, FlutterStreamHandler,
 
   private func handleShowPreloadedChat(result: @escaping FlutterResult) {
     if isInitialized {
+      ensureActiveWindowScene()
       LiveChat.presentChat()
       result(nil)
     } else {
       result(FlutterError(code: "NOT_INITIALIZED", message: "Chat is not initialized. Call initializeChat first.", details: nil))
+    }
+  }
+
+  /// LiveChat 2.x on iOS 13+ uses `UIWindow` overlay that needs a target
+  /// `UIWindowScene`. If `LiveChat.windowScene` is not set, the chat window
+  /// silently fails to attach (no error, just nothing visible). Default it
+  /// to the foreground-active scene right before presenting.
+  private func ensureActiveWindowScene() {
+    if #available(iOS 13.0, *), LiveChat.windowScene == nil {
+      LiveChat.windowScene = UIApplication.shared.connectedScenes
+        .compactMap { $0 as? UIWindowScene }
+        .first { $0.activationState == .foregroundActive }
+        ?? UIApplication.shared.connectedScenes
+          .compactMap { $0 as? UIWindowScene }
+          .first
     }
   }
 
